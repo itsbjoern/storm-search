@@ -33,19 +33,22 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.activate = activate;
-exports.deactivate = deactivate;
+exports.FileService = void 0;
 const vscode = __importStar(require("vscode"));
-const WebviewManager_1 = require("./WebviewManager");
-let webviewManager;
-function activate(context) {
-    webviewManager = new WebviewManager_1.WebviewManager(context);
-    const openSearchCommand = vscode.commands.registerCommand('custom-search.openSearch', () => {
-        webviewManager?.show();
-    });
-    context.subscriptions.push(openSearchCommand);
+class FileService {
+    async getFileContent(filePath) {
+        const uri = vscode.Uri.file(filePath);
+        const document = await vscode.workspace.openTextDocument(uri);
+        return document.getText();
+    }
+    async openFileAtLocation(filePath, line) {
+        const uri = vscode.Uri.file(filePath);
+        const document = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(document);
+        const position = new vscode.Position(line - 1, 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+    }
 }
-function deactivate() {
-    webviewManager?.dispose();
-}
-//# sourceMappingURL=extension.js.map
+exports.FileService = FileService;
+//# sourceMappingURL=FileService.js.map
