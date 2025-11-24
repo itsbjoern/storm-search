@@ -3,30 +3,38 @@ import { createHighlighter, Highlighter, BundledLanguage } from 'shiki';
 import path from 'path';
 
 
-export type TokenColor = {
+type TokenColor = {
     scope: string[];
     settings: any
 }
 
-// Lifted and adapted from: https://github.com/microsoft/vscode/issues/32813#issuecomment-524174937
-export function getThemeSettings(themeName: string | undefined): TokenColor[] {
-    if (!themeName) {
-        return [];
-    }
+type Theme = {
+    name: string;
+    settings: TokenColor[];
+    fg: string;
+    bg: string;
+}
 
-    const tokenColors = new Map();
+// Lifted and adapted from: https://github.com/microsoft/vscode/issues/32813#issuecomment-524174937
+export function getTheme(themeName: string | undefined): Theme | null {
+    if (!themeName) {
+        return null;
+    }
 
     // Resolves theme folder path at runtime
     let currentThemePath;
     for (const extension of vscode.extensions.all) {
         // extension.packageJSON.contributes.themes is resolveable even if the extension doesn't actually contribute any themes
         const themes = extension.packageJSON.contributes && extension.packageJSON.contributes.themes;
-        const currentTheme = themes && themes.find((theme: any) => theme.label === themeName);
+        const currentTheme = themes && themes.find((theme: any) => theme.label === themeName || theme.id === themeName);
         if (currentTheme) {
             currentThemePath = path.join(extension.extensionPath, currentTheme.path);
             break;
         }
     }
+
+    const colors = new Map();
+    const tokenColors = new Map();
 
     // Resolve all included themes, add nested theme paths if necessary
     const themePaths = [];
@@ -37,8 +45,16 @@ export function getThemeSettings(themeName: string | undefined): TokenColor[] {
         if (!themePath) throw new Error("this is to make typescript happy");
         const theme: any = require(themePath);
         if (theme) {
+            console.log(theme)
             if (theme.include) {
                 themePaths.push(path.join(path.dirname(themePath), theme.include));
+            }
+            if (theme.colors) {
+                for (const colorId in theme.colors) {
+                    if (!colors.has(colorId)) {
+                        colors.set(colorId, theme.colors[colorId]);
+                    }
+                }
             }
             if (theme.tokenColors) {
                 theme.tokenColors.forEach((rule: any) => {
@@ -64,29 +80,35 @@ export function getThemeSettings(themeName: string | undefined): TokenColor[] {
         finalSettings.push({ scope: [scope], settings: safeSettings });
     }
 
-    return finalSettings
+    if (finalSettings.length === 0) {
+        return null
+    }
+    const isDark = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark;
+    const foregroundColor = colors.get('editor.foreground') || (isDark ? '#FFFFFF' : '#000000');
+    const backgroundColor = colors.get('editor.background') || (isDark ? '#1E1E1E' : '#FFFFFF');
+
+    return {
+        name: "custom-theme",
+        settings: finalSettings,
+        fg: foregroundColor,
+        bg: backgroundColor
+    }
 }
 
 
 export class SyntaxHighlightService {
     private highlighter: Highlighter | undefined;
-    private currentTheme: { name: string; settings?: TokenColor[] } = { name: 'dark-plus' };
+    private customTheme?: Theme;
 
     async initialize(): Promise<void> {
         const currentThemeName = vscode.workspace.getConfiguration('workbench').get<string>('colorTheme');
-
-        if (currentThemeName) {
-            const themeSettings = getThemeSettings(currentThemeName);
-            if (themeSettings.length > 0) {
-                this.currentTheme = {
-                    name: "custom-theme",
-                    settings: themeSettings
-                }
-            }
+        const theme = getTheme(currentThemeName);
+        if (theme) {
+            this.customTheme = theme;
         }
 
         this.highlighter = await createHighlighter({
-            themes: [this.currentTheme],
+            themes: [this.customTheme || "dark-plus"],
             langs: [
                 'typescript', 'javascript', 'python', 'java', 'css', 'html',
                 'json', 'markdown', 'yaml', 'xml', 'sql', 'shell', 'php',
@@ -105,7 +127,7 @@ export class SyntaxHighlightService {
         try {
             const html = this.highlighter!.codeToHtml(code, {
                 lang: language,
-                theme: this.currentTheme.name
+                theme: this.customTheme ? this.customTheme.name : "dark-plus"
             });
 
             // Extract just the code part without the pre/code wrapper
@@ -129,7 +151,7 @@ export class SyntaxHighlightService {
             try {
                 const html = this.highlighter!.codeToHtml(line || ' ', {
                     lang: language,
-                    theme: this.currentTheme.name
+                    theme: this.customTheme ? this.customTheme.name : "dark-plus"
                 });
 
                 // Extract just the line content
