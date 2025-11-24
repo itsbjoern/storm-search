@@ -4,7 +4,7 @@
 
 [Install on the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Benxlabs.storm-search)
 
-[![OpenPledge](https://raw.githubusercontent.com/zigcBenx/weather-app/ff8ab3b35353253e3c65d2bd9f926fcf229f92c1/ablblbl(4).svg)](https://openpledge.io)
+[![OpenPledge](https://raw.githubusercontent.com/zigcBenx/weather-app/ff8ab3b35353253e3c65d2bd9f926fcf229f92c1/ablblbl(4).svg)](https://app.openpledge.io/repositories/zigcBenx/storm-search)
 
 ![Demo](images/demo.gif)
 
