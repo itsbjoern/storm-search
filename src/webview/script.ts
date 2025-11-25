@@ -1,23 +1,31 @@
-// @ts-check
+/// <reference lib="dom" />
+
+import { FileSearchResult, SearchMatch } from "../types";
+
 
 // Script run within the webview itself.
 (function () {
     // @ts-ignore
     const vscode = acquireVsCodeApi();
 
-    const searchInput = document.getElementById('searchInput');
-    const resultsHeader = document.getElementById('resultsHeader');
-    const resultsList = document.getElementById('resultsList');
-    const previewHeader = document.getElementById('previewHeader');
-    const previewContent = document.getElementById('previewContent');
+    const searchInput = document.getElementById('searchInput')!;
+    const resultsHeader = document.getElementById('resultsHeader')!;
+    const resultsList = document.getElementById('resultsList')!;
+    const previewHeader = document.getElementById('previewHeader')!;
+    const previewContent = document.getElementById('previewContent')!;
 
-    let allMatches = [];
+    let allMatches: SearchMatch[] = [];
     let selectedMatchIndex = -1;
     let currentQuery = '';
-    let fileContentsCache = {};
-    let searchTimeout;
+    let fileContentsCache: {
+        [key: string]: {
+            content: string;
+            colorizedLines: string[] | null;
+        }
+    } = {};
+    let searchTimeout: any = null;
 
-    window.addEventListener('message', event => {
+    window.addEventListener('message', (event) => {
         const message = event.data;
         switch (message.command) {
             case 'searchResults':
@@ -29,8 +37,9 @@
         }
     });
 
-    searchInput.addEventListener('input', (e) => {
-        const searchText = e.target.value.trim();
+    searchInput.addEventListener('input', (event) => {
+        if (!event.target) return;
+        const searchText = (event.target as HTMLInputElement).value.trim();
 
         if (!searchText) {
             clearResults();
@@ -52,7 +61,7 @@
         allMatches = [];
     }
 
-    function handleSearchResults(results) {
+    function handleSearchResults(results: FileSearchResult[]) {
         allMatches = [];
 
         if (!results || results.length === 0) {
@@ -80,12 +89,12 @@
         }
     }
 
-    function getFileIcon(fileName) {
+    function getFileIcon(fileName: string): string {
         const ext = fileName.split('.').pop()?.toLowerCase() || '';
         const name = fileName.toLowerCase();
 
         // Icon configuration with colors and labels
-        const iconMap = {
+        const iconMap: Record<string, { label: string, color: string }> = {
             // Special files
             'package.json': { label: 'PKG', color: '#e8274b' },
             'tsconfig.json': { label: 'TS', color: '#519aba' },
@@ -134,7 +143,7 @@
         return 'data:image/svg+xml;base64,' + btoa(svg);
     }
 
-    function renderResults(results) {
+    function renderResults(results: FileSearchResult[]) {
         const totalMatches = allMatches.length;
         resultsHeader.textContent = `${totalMatches} results in ${results.length} files`;
 
@@ -166,13 +175,13 @@
         resultsList.innerHTML = html;
     }
 
-    function escapeHtml(text) {
+    function escapeHtml(text: string): string {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
 
-    function highlightText(text, query) {
+    function highlightText(text: string, query: string): string {
         if (!query) return escapeHtml(text);
 
         const escapedText = escapeHtml(text);
@@ -187,7 +196,7 @@
         return `${before}<span class="match-highlight">${match}</span>${after}`;
     }
 
-    window.selectMatchById = function (matchId) {
+    function selectMatchById(matchId: number) {
         if (matchId < 0 || matchId >= allMatches.length) return;
 
         selectedMatchIndex = matchId;
@@ -214,8 +223,11 @@
             displayFilePreview(match.filePath, match.line);
         }
     };
+    // Make available globally for onclick handlers
+    // @ts-ignore
+    window.selectMatchById = selectMatchById;
 
-    function handleFileContent(filePath, content, colorizedLines) {
+    function handleFileContent(filePath: string, content: string, colorizedLines: string[] | null) {
         fileContentsCache[filePath] = {
             content: content,
             colorizedLines: colorizedLines || null
@@ -226,7 +238,7 @@
         }
     }
 
-    function displayFilePreview(filePath, lineNumber) {
+    function displayFilePreview(filePath: string, lineNumber: number) {
         const cached = fileContentsCache[filePath];
         if (!cached) return;
 
@@ -282,7 +294,7 @@
         });
     }
 
-    function adjustLineNumbersForWrapping(totalLines) {
+    function adjustLineNumbersForWrapping(totalLines: number) {
         const lineNumbersContainer = document.getElementById('previewLineNumbers');
         if (!lineNumbersContainer) return;
 
@@ -309,7 +321,7 @@
         }
     }
 
-    function highlightSearchQuery(text, query) {
+    function highlightSearchQuery(text: string, query: string): string {
         if (!query) {
             return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
@@ -326,7 +338,7 @@
         return `${before}<span class="match-highlight">${match}</span>${after}`;
     }
 
-    function addSearchHighlightToColorizedLine(colorizedHtml, plainText, query) {
+    function addSearchHighlightToColorizedLine(colorizedHtml: string, plainText: string, query: string) {
         if (!query) return colorizedHtml;
 
         const index = plainText.toLowerCase().indexOf(query.toLowerCase());
@@ -346,7 +358,7 @@
         let currentPos = 0;
         const matchEnd = matchIndex + query.length;
 
-        function wrapTextNodes(node) {
+        function wrapTextNodes(node: Node) {
             if (node.nodeType === Node.TEXT_NODE) {
                 const nodeText = node.textContent || '';
                 const nodeStart = currentPos;
@@ -370,7 +382,9 @@
                     fragment.appendChild(span);
                     if (after) fragment.appendChild(document.createTextNode(after));
 
-                    node.parentNode.replaceChild(fragment, node);
+                    if (node.parentNode) {
+                        node.parentNode.replaceChild(fragment, node);
+                    }
                 }
 
                 currentPos += nodeText.length;

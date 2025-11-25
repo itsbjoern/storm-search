@@ -2,7 +2,7 @@ export interface SearchMatch {
     filePath: string;
     relativePath: string;
     line: number;
-    column: number;
+    column?: number;
     text: string;
 }
 

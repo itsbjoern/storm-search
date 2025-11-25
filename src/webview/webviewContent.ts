@@ -48,6 +48,8 @@ export function getWebviewContent(options: WebviewContentOptions): string {
         </div>
     </div>
 
+    <!-- Otherwise causes issues when importing types in the script -->
+    <script>var exports = {};</script>
     <script nonce="${getNonce()}" src="${options.scriptUri}"></script>
 </body>
 </html>`;
