@@ -53,7 +53,11 @@ export class WebviewManager {
             vscode.ViewColumn.Active,
             {
                 enableScripts: true,
-                retainContextWhenHidden: true
+                retainContextWhenHidden: true,
+                localResourceRoots: [
+                    vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+                    vscode.Uri.joinPath(this.context.extensionUri, 'out', 'webview')
+                ]
             }
         );
 
@@ -63,7 +67,14 @@ export class WebviewManager {
         const editorConfig = vscode.workspace.getConfiguration('editor');
         const wordWrap = editorConfig.get<string>('wordWrap', 'off');
 
-        panel.webview.html = getWebviewContent(wordWrap);
+        const scriptUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'out', 'webview', 'script.js'));
+        const styleUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'styles.css'));
+
+        panel.webview.html = getWebviewContent({
+            scriptUri,
+            styleUri,
+            wordWrap,
+        });
         this.setupMessageHandler(panelId, panel);
         this.setupPanelDisposal(panelId, panel);
     }
