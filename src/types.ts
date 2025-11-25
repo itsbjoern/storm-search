@@ -2,7 +2,7 @@ export interface SearchMatch {
     filePath: string;
     relativePath: string;
     line: number;
-    column?: number;
+    column: number;
     text: string;
 }
 
@@ -20,10 +20,9 @@ export interface WebviewMessage {
 }
 
 export interface SearchOptions {
-    maxResults: number;
+    maxResults?: number;
+    maxMatchesPerFile?: number;
+    maxFilesToSearch?: number;
     maxFileSize: number;
-    maxMatchesPerFile: number;
     batchSize: number;
-    maxFilesToSearch: number;
-    debounceMs: number;
 }

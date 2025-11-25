@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { FileSearchResult, SearchMatch, SearchOptions } from '../types';
 import { EXCLUDE_PATTERNS, BINARY_EXTENSIONS, DEFAULT_SEARCH_OPTIONS } from '../constants';
+import { escapeRegExp } from '../util';
 
 export class SearchService {
     private options: SearchOptions;
@@ -9,29 +10,38 @@ export class SearchService {
         this.options = { ...DEFAULT_SEARCH_OPTIONS, ...options };
     }
 
-    async search(query: string): Promise<FileSearchResult[]> {
+    getSearchOptions(): SearchOptions {
+        return this.options;
+    }
+
+    async getSearchableFiles(): Promise<vscode.Uri[]> {
+        const allExcludePatterns = EXCLUDE_PATTERNS;
+        for (const binaryExtension of BINARY_EXTENSIONS) {
+            allExcludePatterns.push(`**/*.${binaryExtension}`);
+        }
+        const excludeGlob = `{${allExcludePatterns.join(',')}}`;
+        const cancellationTokenSource = new vscode.CancellationTokenSource();
+        const timer = setTimeout(() => {
+            cancellationTokenSource.cancel();
+            cancellationTokenSource.dispose();
+        }, 1000);
+
+        const files = await vscode.workspace.findFiles('**/*', excludeGlob, this.options.maxFilesToSearch, cancellationTokenSource.token);;
+        clearTimeout(timer);
+        cancellationTokenSource.dispose();
+
+        return files;
+    }
+
+    async search(files: vscode.Uri[], query: string): Promise<FileSearchResult[]> {
+        const fileMatchMap = new Map<string, SearchMatch[]>();
         if (!query) {
             return [];
         }
 
-        const fileMatchMap = new Map<string, SearchMatch[]>();
-        const excludeGlob = `{${EXCLUDE_PATTERNS.join(',')}}`;
-
-        const files = await vscode.workspace.findFiles('**/*', excludeGlob, 1000);
-        const textFiles = this.filterTextFiles(files);
-        const filesToSearch = textFiles.slice(0, this.options.maxFilesToSearch);
         const queryLower = query.toLowerCase();
-
-        await this.searchInBatches(filesToSearch, queryLower, fileMatchMap);
-
+        await this.searchInBatches(files, queryLower, fileMatchMap);
         return this.convertMapToResults(fileMatchMap);
-    }
-
-    private filterTextFiles(files: vscode.Uri[]): vscode.Uri[] {
-        return files.filter(file => {
-            const ext = file.fsPath.split('.').pop()?.toLowerCase() || '';
-            return !BINARY_EXTENSIONS.has(ext);
-        });
     }
 
     private async searchInBatches(
@@ -39,12 +49,16 @@ export class SearchService {
         queryLower: string,
         fileMatchMap: Map<string, SearchMatch[]>
     ): Promise<void> {
-        for (let i = 0; i < files.length && fileMatchMap.size < this.options.maxResults; i += this.options.batchSize) {
+        for (let i = 0; i < files.length; i += this.options.batchSize) {
+            if (this.options.maxResults && fileMatchMap.size >= this.options.maxResults) {
+                break;
+            }
+
             const batch = files.slice(i, i + this.options.batchSize);
             const results = await this.searchBatch(batch, queryLower);
 
             for (const result of results) {
-                if (result && fileMatchMap.size < this.options.maxResults) {
+                if (result) {
                     fileMatchMap.set(result.filePath, result.matches);
                 }
             }
@@ -85,24 +99,31 @@ export class SearchService {
         textLower: string,
         queryLower: string
     ): SearchMatch[] {
-        const lines = text.split('\n');
+        const regularLines = text.split('\n');
+        const lowerLines = textLower.split('\n');
         const matches: SearchMatch[] = [];
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(file);
         const relativePath = workspaceFolder
             ? vscode.workspace.asRelativePath(file, false)
             : file.fsPath;
 
-        for (let i = 0; i < lines.length && matches.length < this.options.maxMatchesPerFile; i++) {
-            const line = lines[i];
-            const lineLower = line.toLowerCase();
+        const matchExp = new RegExp(escapeRegExp(queryLower), 'g');
+        for (let i = 0; i < lowerLines.length; i++) {
+            if (this.options.maxMatchesPerFile && matches.length >= this.options.maxMatchesPerFile) {
+                break;
+            }
 
-            if (lineLower.includes(queryLower)) {
+            const regularLine = regularLines[i].trim();
+            const lowerLine = lowerLines[i].trim();
+            const lineMatches = lowerLine.matchAll(matchExp);
+
+            for (const match of lineMatches) {
                 matches.push({
                     filePath: file.fsPath,
                     relativePath,
                     line: i + 1,
-                    column: lineLower.indexOf(queryLower),
-                    text: line.trim()
+                    column: match.index !== undefined ? match.index : 0,
+                    text: regularLine
                 });
             }
         }

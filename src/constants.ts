@@ -46,12 +46,11 @@ export const BINARY_EXTENSIONS = new Set([
 ]);
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
-    maxResults: 100,
+    maxResults: undefined,
+    maxMatchesPerFile: undefined,
+    maxFilesToSearch: undefined,
     maxFileSize: 500 * 1024, // 500KB
-    maxMatchesPerFile: 5,
     batchSize: 100,
-    maxFilesToSearch: 2000,
-    debounceMs: 75
 };
 
 export const LANGUAGE_MAP: Record<string, string> = {
