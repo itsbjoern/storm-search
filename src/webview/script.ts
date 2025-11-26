@@ -108,7 +108,8 @@ type SearchMatchWithId = SearchMatch & { matchId: number };
                     relativePath: file.relativePath,
                     line: match.line,
                     column: match.column,
-                    text: match.text
+                    preview: match.preview,
+                    previewColumn: match.previewColumn,
                 });
             });
         });
@@ -131,7 +132,8 @@ type SearchMatchWithId = SearchMatch & { matchId: number };
                     relativePath: file.relativePath,
                     line: match.line,
                     column: match.column,
-                    text: match.text
+                    preview: match.preview,
+                    previewColumn: match.previewColumn,
                 });
             });
         });
@@ -205,12 +207,15 @@ type SearchMatchWithId = SearchMatch & { matchId: number };
         let currentFile = '';
         let html = '';
 
+        // Ensure that header is updated with total counts even if rendering is stopped early
+        resultsHeader.textContent = `${allMatches.length} results in ${allFiles.size} files`;
+
         const currentlyRenderedCount = append ? resultsList.querySelectorAll('.match-item').length : 0;
         if (append && currentlyRenderedCount >= upTo) {
             return
         }
 
-        for (let i = 0; i < allMatches.length; i++) {
+        for (let i = 0; i < allMatches.length - currentlyRenderedCount; i++) {
             const match = allMatches[currentlyRenderedCount + i];
 
             const fileName = match.relativePath.split('/').pop() || match.relativePath;
@@ -235,14 +240,14 @@ type SearchMatchWithId = SearchMatch & { matchId: number };
                     <span class="file-name">${escapeHtml(fileName)}</span>
                 </div>`;
             }
-            const highlighted = highlightText(match.text, currentQuery, match.column);
+            const highlighted = highlightText(match.preview, currentQuery, match.previewColumn);
             html += `<div class="match-item" data-match-id="${match.matchId}" onclick="selectMatchById(${match.matchId})">
                 <span class="match-line-number">[${match.line}]</span>
                 <span class="match-text">${highlighted}</span>
             </div>`;
         }
 
-        resultsHeader.textContent = `${allMatches.length} results in ${allFiles.size} files`;
+
         if (append) {
             resultsList.innerHTML += html;
         } else {
@@ -260,7 +265,7 @@ type SearchMatchWithId = SearchMatch & { matchId: number };
         if (!query) return escapeHtml(text);
 
         const escapedText = escapeHtml(text);
-        const index = text.toLowerCase().indexOf(query.toLowerCase(), column - 1);
+        const index = text.toLowerCase().indexOf(query.toLowerCase(), column);
 
         if (index === -1) return escapedText;
 
@@ -365,13 +370,13 @@ type SearchMatchWithId = SearchMatch & { matchId: number };
     `;
 
         requestAnimationFrame(() => {
+            // Adjust line numbers to account for wrapped lines
+            adjustLineNumbersForWrapping(totalLines);
+
             const matchLineElement = document.getElementById('code-line-' + lineNumber);
             if (matchLineElement) {
                 matchLineElement.scrollIntoView({ behavior: 'instant', block: 'center' });
             }
-
-            // Adjust line numbers to account for wrapped lines
-            adjustLineNumbersForWrapping(totalLines);
         });
     }
 
@@ -498,7 +503,8 @@ type SearchMatchWithId = SearchMatch & { matchId: number };
                 vscode.postMessage({
                     command: 'openFile',
                     filePath: match.filePath,
-                    line: match.line
+                    line: match.line,
+                    column: match.column,
                 });
             }
         } else if (e.key === 'Escape') {

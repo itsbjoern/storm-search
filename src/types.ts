@@ -3,7 +3,8 @@ export interface SearchMatch {
     relativePath: string;
     line: number;
     column: number;
-    text: string;
+    previewColumn: number;
+    preview: string;
 }
 
 export interface FileSearchResult {
@@ -17,6 +18,7 @@ export interface WebviewMessage {
     text?: string;
     filePath?: string;
     line?: number;
+    column?: number;
 }
 
 export interface SearchOptions {

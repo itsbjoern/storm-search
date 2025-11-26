@@ -119,7 +119,7 @@ export class WebviewManager {
 
             case 'openFile':
                 if (message.filePath && message.line !== undefined) {
-                    await this.handleOpenFile(panel, message.filePath, message.line);
+                    await this.handleOpenFile(panel, message.filePath, message.line, message.column);
                 }
                 break;
         }
@@ -136,7 +136,7 @@ export class WebviewManager {
             for (let i = 0; i < searchableFiles.length; i += searchOptions.batchSize) {
                 if (this.panelSearches.get(panelId) !== query) {
                     // A new search has been initiated in this panel, abort current search
-                    break;
+                    return;
                 }
 
                 const batch = searchableFiles.slice(i, i + searchOptions.batchSize);
@@ -187,9 +187,9 @@ export class WebviewManager {
         }
     }
 
-    private async handleOpenFile(panel: vscode.WebviewPanel, filePath: string, line: number): Promise<void> {
+    private async handleOpenFile(panel: vscode.WebviewPanel, filePath: string, line: number, column: number): Promise<void> {
         try {
-            await this.fileService.openFileAtLocation(filePath, line);
+            await this.fileService.openFileAtLocation(filePath, line, column);
             panel.dispose();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to open file: ${error}`);

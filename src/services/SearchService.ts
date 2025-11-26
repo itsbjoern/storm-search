@@ -113,17 +113,30 @@ export class SearchService {
                 break;
             }
 
-            const regularLine = regularLines[i].trim();
-            const lowerLine = lowerLines[i].trim();
-            const lineMatches = lowerLine.matchAll(matchExp);
+            const previewLine = regularLines[i];
+            // const previewTrimOffset = regularLine.length - previewLine.length;
 
+            const lowerLine = lowerLines[i];
+            const lineMatches = lowerLine.matchAll(matchExp);
             for (const match of lineMatches) {
+                // clamp line preview to max 50 characters before and after to prevent issues with extremely long lines
+                const start = Math.max(0, match.index - 50);
+                const end = Math.min(previewLine.length, match.index + queryLower.length + 50);
+                const preview = previewLine.substring(start, end);
+
+                const trimmedPreview = preview.trimStart();
+                const leadingSpaces = preview.length - trimmedPreview.length;
+
+                // Adjusted column to account for clamping
+                const previewColumn = match.index - start - leadingSpaces;
+
                 matches.push({
                     filePath: file.fsPath,
                     relativePath,
                     line: i + 1,
-                    column: match.index !== undefined ? match.index : 0,
-                    text: regularLine
+                    column: match.index,
+                    preview: trimmedPreview.trimEnd(),
+                    previewColumn
                 });
             }
         }
