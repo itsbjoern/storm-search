@@ -7,6 +7,8 @@ import { getWebviewContent } from './webview/webviewContent';
 
 export class WebviewManager {
     private panels: Map<string, vscode.WebviewPanel> = new Map();
+    private panelSearches: Map<string, string> = new Map();
+
     private searchService: SearchService;
     private fileService: FileService;
     private syntaxHighlightService: SyntaxHighlightService;
@@ -17,6 +19,11 @@ export class WebviewManager {
         this.searchService = new SearchService();
         this.fileService = new FileService();
         this.syntaxHighlightService = new SyntaxHighlightService();
+
+        const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument(e => {
+            this.clearCache(e.document.uri.toString());
+        });
+        this.disposables.push(changeDocumentSubscription);
     }
 
     show(): void {
@@ -38,6 +45,7 @@ export class WebviewManager {
     dispose(): void {
         this.panels.forEach(panel => panel.dispose());
         this.panels.clear();
+        this.panelSearches.clear();
         this.disposables.forEach(d => d.dispose());
         this.syntaxHighlightService.dispose();
     }
@@ -99,7 +107,7 @@ export class WebviewManager {
 
             case 'search':
                 if (message.text) {
-                    await this.handleSearch(panel, message.text);
+                    await this.handleSearch(panelId, panel, message.text);
                 }
                 break;
 
@@ -111,20 +119,43 @@ export class WebviewManager {
 
             case 'openFile':
                 if (message.filePath && message.line !== undefined) {
-                    await this.handleOpenFile(panel, message.filePath, message.line);
+                    await this.handleOpenFile(panel, message.filePath, message.line, message.column);
                 }
                 break;
         }
     }
 
-    private async handleSearch(panel: vscode.WebviewPanel, query: string): Promise<void> {
+    private async handleSearch(panelId: string, panel: vscode.WebviewPanel, query: string): Promise<void> {
         try {
-            const results = await this.searchService.search(query);
+            this.panelSearches.set(panelId, query);
 
-            panel.webview.postMessage({
-                command: 'searchResults',
-                results
-            });
+            const searchableFiles = await this.searchService.getSearchableFiles();
+            const searchOptions = this.searchService.getSearchOptions();
+            let resultCount = 0;
+
+            for (let i = 0; i < searchableFiles.length; i += searchOptions.batchSize) {
+                if (this.panelSearches.get(panelId) !== query) {
+                    // A new search has been initiated in this panel, abort current search
+                    return;
+                }
+
+                const batch = searchableFiles.slice(i, i + searchOptions.batchSize);
+                const results = await this.searchService.search(batch, query);
+                if (results.length === 0) {
+                    continue;
+                }
+                resultCount += results.length;
+                panel.webview.postMessage({
+                    command: i === 0 ? 'newSearchResults' : 'extendSearchResults',
+                    results
+                });
+            }
+
+            if (resultCount === 0) {
+                panel.webview.postMessage({
+                    command: 'noResults'
+                });
+            }
         } catch (error) {
             console.error('Search error:', error);
         }
@@ -147,9 +178,18 @@ export class WebviewManager {
         }
     }
 
-    private async handleOpenFile(panel: vscode.WebviewPanel, filePath: string, line: number): Promise<void> {
+    private async clearCache(filePath: string): Promise<void> {
+        for (const panel of this.panels.values()) {
+            panel.webview.postMessage({
+                command: 'clearCache',
+                filePath
+            });
+        }
+    }
+
+    private async handleOpenFile(panel: vscode.WebviewPanel, filePath: string, line: number, column: number): Promise<void> {
         try {
-            await this.fileService.openFileAtLocation(filePath, line);
+            await this.fileService.openFileAtLocation(filePath, line, column);
             panel.dispose();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to open file: ${error}`);

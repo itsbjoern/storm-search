@@ -2,8 +2,9 @@ export interface SearchMatch {
     filePath: string;
     relativePath: string;
     line: number;
-    column?: number;
-    text: string;
+    column: number;
+    previewColumn: number;
+    preview: string;
 }
 
 export interface FileSearchResult {
@@ -12,18 +13,25 @@ export interface FileSearchResult {
     matches: SearchMatch[];
 }
 
-export interface WebviewMessage {
-    command: 'search' | 'getFileContent' | 'openFile' | 'close';
-    text?: string;
-    filePath?: string;
-    line?: number;
+export type WebviewMessage = {
+    command: 'search'
+    text: string;
+} | {
+    command: 'getFileContent'
+    filePath: string;
+} | {
+    command: 'openFile'
+    filePath: string;
+    line: number;
+    column: number;
+} | {
+    command: 'close';
 }
 
 export interface SearchOptions {
-    maxResults: number;
+    maxResults?: number;
+    maxMatchesPerFile?: number;
+    maxFilesToSearch?: number;
     maxFileSize: number;
-    maxMatchesPerFile: number;
     batchSize: number;
-    maxFilesToSearch: number;
-    debounceMs: number;
 }

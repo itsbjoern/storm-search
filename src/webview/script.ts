@@ -1,12 +1,18 @@
 /// <reference lib="dom" />
 
-import { FileSearchResult, SearchMatch } from "../types";
+import { FileSearchResult, SearchMatch, WebviewMessage } from "../types";
 
+
+type SearchMatchWithId = SearchMatch & { matchId: number };
 
 // Script run within the webview itself.
 (function () {
     // @ts-ignore
     const vscode = acquireVsCodeApi();
+
+    const postMessage = (message: WebviewMessage) => {
+        vscode.postMessage(message);
+    };
 
     const searchInput = document.getElementById('searchInput')!;
     const resultsHeader = document.getElementById('resultsHeader')!;
@@ -14,7 +20,9 @@ import { FileSearchResult, SearchMatch } from "../types";
     const previewHeader = document.getElementById('previewHeader')!;
     const previewContent = document.getElementById('previewContent')!;
 
-    let allMatches: SearchMatch[] = [];
+    let allMatches: SearchMatchWithId[] = [];
+    let allFiles: Set<string> = new Set();
+
     let selectedMatchIndex = -1;
     let currentQuery = '';
     let fileContentsCache: {
@@ -28,11 +36,20 @@ import { FileSearchResult, SearchMatch } from "../types";
     window.addEventListener('message', (event) => {
         const message = event.data;
         switch (message.command) {
-            case 'searchResults':
-                handleSearchResults(message.results);
+            case 'newSearchResults':
+                handleNewSearchResults(message.results);
+                break;
+            case 'extendSearchResults':
+                handleExtendSearchResults(message.results);
+                break;
+            case 'noResults':
+                handleNoResults();
                 break;
             case 'fileContent':
                 handleFileContent(message.filePath, message.content, message.colorizedLines);
+                break;
+            case 'clearCache':
+                handleClearCache(message.filePath);
                 break;
         }
     });
@@ -48,9 +65,29 @@ import { FileSearchResult, SearchMatch } from "../types";
 
         currentQuery = searchText;
         clearTimeout(searchTimeout);
+
+        // Ensure a longer delay for short queries as they are more likely to change
+        const timeoutDelay = searchText.length < 3 ? 500 : 75;
         searchTimeout = setTimeout(() => {
-            vscode.postMessage({ command: 'search', text: searchText });
-        }, 75);
+            postMessage({ command: 'search', text: searchText });
+        }, timeoutDelay);
+    });
+
+    let scrollDebounce: any = null;
+    resultsList.addEventListener('scroll', () => {
+        if (scrollDebounce) {
+            return;
+        }
+        const scrollPosition = resultsList.scrollTop + resultsList.clientHeight;
+        const threshold = resultsList.scrollHeight - 20;
+
+        if (scrollPosition >= threshold) {
+            scrollDebounce = setTimeout(() => {
+                scrollDebounce = null;
+            }, 500);
+            const currentlyRenderedCount = resultsList.querySelectorAll('.match-item').length;
+            renderMatches(currentlyRenderedCount + 100, true);
+        }
     });
 
     function clearResults() {
@@ -59,35 +96,62 @@ import { FileSearchResult, SearchMatch } from "../types";
         previewContent.innerHTML = '<div class="empty-state">Select a match to preview</div>';
         previewHeader.textContent = 'No file selected';
         allMatches = [];
+        allFiles = new Set();
     }
 
-    function handleSearchResults(results: FileSearchResult[]) {
+    function handleNewSearchResults(results: FileSearchResult[]) {
         allMatches = [];
-
-        if (!results || results.length === 0) {
-            resultsList.innerHTML = '<div class="empty-state">No results found</div>';
-            resultsHeader.textContent = '0 results';
-            previewContent.innerHTML = '<div class="empty-state">No results</div>';
-            return;
-        }
+        allFiles = new Set();
 
         results.forEach(file => {
+            allFiles.add(file.filePath);
             file.matches.forEach(match => {
                 allMatches.push({
+                    matchId: allMatches.length,
                     filePath: file.filePath,
                     relativePath: file.relativePath,
                     line: match.line,
-                    text: match.text
+                    column: match.column,
+                    preview: match.preview,
+                    previewColumn: match.previewColumn,
                 });
             });
         });
 
-        renderResults(results);
+        renderMatches(100);
 
         if (allMatches.length > 0) {
             selectMatchById(0);
         }
     }
+
+    function handleExtendSearchResults(results: FileSearchResult[]) {
+        const newMatches: SearchMatchWithId[] = [];
+        results.forEach(file => {
+            allFiles.add(file.filePath);
+            file.matches.forEach(match => {
+                newMatches.push({
+                    matchId: allMatches.length,
+                    filePath: file.filePath,
+                    relativePath: file.relativePath,
+                    line: match.line,
+                    column: match.column,
+                    preview: match.preview,
+                    previewColumn: match.previewColumn,
+                });
+            });
+        });
+        allMatches = allMatches.concat(newMatches);
+
+        renderMatches(100, true);
+    }
+
+    function handleNoResults() {
+        resultsList.innerHTML = '<div class="empty-state">No results found</div>';
+        resultsHeader.textContent = '0 results';
+        previewContent.innerHTML = '<div class="empty-state">No results</div>';
+    }
+
 
     function getFileIcon(fileName: string): string {
         const ext = fileName.split('.').pop()?.toLowerCase() || '';
@@ -143,49 +207,69 @@ import { FileSearchResult, SearchMatch } from "../types";
         return 'data:image/svg+xml;base64,' + btoa(svg);
     }
 
-    function renderResults(results: FileSearchResult[]) {
-        const totalMatches = allMatches.length;
-        resultsHeader.textContent = `${totalMatches} results in ${results.length} files`;
-
+    function renderMatches(upTo: number, append: boolean = false) {
+        let currentFile = '';
         let html = '';
-        results.forEach(file => {
-            const fileName = file.relativePath.split('/').pop() || file.relativePath;
+
+        // Ensure that header is updated with total counts even if rendering is stopped early
+        resultsHeader.textContent = `${allMatches.length} results in ${allFiles.size} files`;
+
+        const currentlyRenderedCount = append ? resultsList.querySelectorAll('.match-item').length : 0;
+        if (append && currentlyRenderedCount >= upTo) {
+            return
+        }
+
+        for (let i = 0; i < allMatches.length - currentlyRenderedCount; i++) {
+            const match = allMatches[currentlyRenderedCount + i];
+
+            const fileName = match.relativePath.split('/').pop() || match.relativePath;
             const iconSrc = getFileIcon(fileName);
+            const isNewFile = match.relativePath !== currentFile;
 
-            html += `<div class="file-group">
-            <div class="file-header" title="${escapeHtml(file.relativePath)}">
-                <img src="${iconSrc}" class="file-icon" alt="">
-                <span class="file-name">${escapeHtml(fileName)}</span>
-            </div>`;
+            if (isNewFile) {
+                if (i > 0) {
+                    html += '</div>'; // Close previous file-group
+                }
 
-            file.matches.forEach(match => {
-                const highlighted = highlightText(match.text, currentQuery);
-                const matchId = allMatches.findIndex(m =>
-                    m.filePath === file.filePath && m.line === match.line
-                );
-                html += `<div class="match-item" data-match-id="${matchId}" onclick="selectMatchById(${matchId})">
+                // Limit number of rendered matches per batch with a soft-cap,
+                // because we want to avoid splitting files across batches.
+                if (currentlyRenderedCount + i >= upTo) {
+                    break;
+                }
+
+                currentFile = match.relativePath;
+                html += `<div class="file-group">
+                <div class="file-header" title="${escapeHtml(match.relativePath)}">
+                    <img src="${iconSrc}" class="file-icon" alt="">
+                    <span class="file-name">${escapeHtml(fileName)}</span>
+                </div>`;
+            }
+            const highlighted = highlightText(match.preview, currentQuery, match.previewColumn);
+            html += `<div class="match-item" data-match-id="${match.matchId}" onclick="selectMatchById(${match.matchId})">
                 <span class="match-line-number">[${match.line}]</span>
                 <span class="match-text">${highlighted}</span>
             </div>`;
-            });
+        }
 
-            html += '</div>';
-        });
 
-        resultsList.innerHTML = html;
+        if (append) {
+            resultsList.innerHTML += html;
+        } else {
+            resultsList.innerHTML = html;
+        }
     }
 
+    const textEscaper = document.createElement('div');
     function escapeHtml(text: string): string {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        textEscaper.textContent = text;
+        return textEscaper.innerHTML;
     }
 
-    function highlightText(text: string, query: string): string {
+    function highlightText(text: string, query: string, column: number): string {
         if (!query) return escapeHtml(text);
 
         const escapedText = escapeHtml(text);
-        const index = text.toLowerCase().indexOf(query.toLowerCase());
+        const index = text.toLowerCase().indexOf(query.toLowerCase(), column);
 
         if (index === -1) return escapedText;
 
@@ -202,7 +286,7 @@ import { FileSearchResult, SearchMatch } from "../types";
         selectedMatchIndex = matchId;
         const match = allMatches[matchId];
 
-        document.querySelectorAll('.match-item').forEach(item => {
+        document.querySelectorAll('.match-item.selected').forEach(item => {
             item.classList.remove('selected');
         });
 
@@ -215,12 +299,12 @@ import { FileSearchResult, SearchMatch } from "../types";
         previewHeader.textContent = match.relativePath;
 
         if (!fileContentsCache[match.filePath]) {
-            vscode.postMessage({
+            postMessage({
                 command: 'getFileContent',
                 filePath: match.filePath
             });
         } else {
-            displayFilePreview(match.filePath, match.line);
+            displayFilePreview(match.filePath, match.line, match.column);
         }
     };
     // Make available globally for onclick handlers
@@ -234,11 +318,17 @@ import { FileSearchResult, SearchMatch } from "../types";
         };
 
         if (selectedMatchIndex >= 0 && allMatches[selectedMatchIndex].filePath === filePath) {
-            displayFilePreview(filePath, allMatches[selectedMatchIndex].line);
+            displayFilePreview(filePath, allMatches[selectedMatchIndex].line, allMatches[selectedMatchIndex].column);
         }
     }
 
-    function displayFilePreview(filePath: string, lineNumber: number) {
+    function handleClearCache(filePath: string) {
+        if (fileContentsCache[filePath]) {
+            delete fileContentsCache[filePath];
+        }
+    }
+
+    function displayFilePreview(filePath: string, lineNumber: number, columnNumber: number) {
         const cached = fileContentsCache[filePath];
         if (!cached) return;
 
@@ -260,12 +350,12 @@ import { FileSearchResult, SearchMatch } from "../types";
 
                 // Add search query highlighting on top of syntax highlighting
                 if (isMatchLine) {
-                    lineContent = addSearchHighlightToColorizedLine(lineContent, lines[i], currentQuery);
+                    lineContent = addSearchHighlightToColorizedLine(lineContent, lines[i], currentQuery, columnNumber);
                 }
             } else {
                 // Fallback to plain highlighting
                 if (isMatchLine) {
-                    lineContent = highlightSearchQuery(lines[i], currentQuery);
+                    lineContent = highlightSearchQuery(lines[i], currentQuery, columnNumber);
                 } else {
                     lineContent = lines[i].replace(/</g, '&lt;').replace(/>/g, '&gt;');
                 }
@@ -284,13 +374,13 @@ import { FileSearchResult, SearchMatch } from "../types";
     `;
 
         requestAnimationFrame(() => {
+            // Adjust line numbers to account for wrapped lines
+            adjustLineNumbersForWrapping(totalLines);
+
             const matchLineElement = document.getElementById('code-line-' + lineNumber);
             if (matchLineElement) {
                 matchLineElement.scrollIntoView({ behavior: 'instant', block: 'center' });
             }
-
-            // Adjust line numbers to account for wrapped lines
-            adjustLineNumbersForWrapping(totalLines);
         });
     }
 
@@ -321,12 +411,12 @@ import { FileSearchResult, SearchMatch } from "../types";
         }
     }
 
-    function highlightSearchQuery(text: string, query: string): string {
+    function highlightSearchQuery(text: string, query: string, columnNumber: number): string {
         if (!query) {
             return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
-        const index = text.toLowerCase().indexOf(query.toLowerCase());
+        const index = text.toLowerCase().indexOf(query.toLowerCase(), columnNumber);
         if (index === -1) {
             return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
@@ -338,7 +428,7 @@ import { FileSearchResult, SearchMatch } from "../types";
         return `${before}<span class="match-highlight">${match}</span>${after}`;
     }
 
-    function addSearchHighlightToColorizedLine(colorizedHtml: string, plainText: string, query: string) {
+    function addSearchHighlightToColorizedLine(colorizedHtml: string, plainText: string, query: string, columnNumber: number): string {
         if (!query) return colorizedHtml;
 
         const index = plainText.toLowerCase().indexOf(query.toLowerCase());
@@ -350,7 +440,7 @@ import { FileSearchResult, SearchMatch } from "../types";
 
         // Get the text content and find the position
         const textContent = temp.textContent || '';
-        const matchIndex = textContent.toLowerCase().indexOf(query.toLowerCase());
+        const matchIndex = textContent.toLowerCase().indexOf(query.toLowerCase(), columnNumber);
 
         if (matchIndex === -1) return colorizedHtml;
 
@@ -414,14 +504,15 @@ import { FileSearchResult, SearchMatch } from "../types";
             e.preventDefault();
             if (selectedMatchIndex >= 0) {
                 const match = allMatches[selectedMatchIndex];
-                vscode.postMessage({
+                postMessage({
                     command: 'openFile',
                     filePath: match.filePath,
-                    line: match.line
+                    line: match.line,
+                    column: match.column,
                 });
             }
         } else if (e.key === 'Escape') {
-            vscode.postMessage({ command: 'close' });
+            postMessage({ command: 'close' });
         }
     });
 
