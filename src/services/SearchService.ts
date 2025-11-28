@@ -31,7 +31,7 @@ export class SearchService {
         clearTimeout(timer);
         cancellationTokenSource.dispose();
 
-        const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
+        const collator = new Intl.Collator('en', { sensitivity: 'base' });
         files.sort((a, b) => {
             const pathA = a.path.split('/');
             const pathB = b.path.split('/');
